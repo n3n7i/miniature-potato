@@ -19,7 +19,10 @@ function api_Obj(){
     token:    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
     assoc:    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
     metaplex: "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
-    memo:     "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo" }; //
+    memo:     "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo", //
+
+    record:   "ReciQBw6sQKH9TVVJQDnbnJ5W7FP539tPHjZhRF4E9r", 
+    name:     "namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX" }; //
 
   this.accountSize = { //};
 
@@ -38,6 +41,12 @@ function api_Obj(){
       offsets: [0,4,36,44],
       sizes:   [4,32,8,1],
       names:   ['mintable', 'mintAuth', 'supply', 'decimals'], }, 
+
+    meta: {
+      offsets: [1,33,65,115],
+      sizes:   [32,32,36,204],
+      names:   ['auth', 'mint', 'name', 'uri'], }, 
+      
 
     };
 
@@ -66,7 +75,7 @@ function api_Obj(){
       burn :      8,
       close :     9,
       }
-    }
+    };
 
   this.instruction_keys = {
     token:  {
@@ -75,11 +84,16 @@ function api_Obj(){
       approve :   3,
       revoke :    2,
       authority : 3,
-      mint_to :   3,
-      burn :      2,
-      close :     2,
-      }
-    }
+      mint_to :   4,
+      burn :      3,
+      close :     3,
+      },
+
+    a_token:  {
+      new_account: 6,
+      nest_close:  7, }
+
+    };
       
 
   this.instruction_datasize = {     /**  ?? */
@@ -92,8 +106,12 @@ function api_Obj(){
       mint_to :   9,
       burn :      9,
       close :     1,
-      }
-    }
+      },
+
+    a_token: {
+      new_account : 1,}
+
+    };
 
   this.tx = { //
     instructions : []}
@@ -124,6 +142,9 @@ function api_Obj(){
       'sendTransaction',
 
     ]};
+
+  this.param = {};
+      //token
 
   this.web3 = { //};
 
@@ -169,12 +190,34 @@ function sol_obj(s){
     return this.sol.PublicKey.findProgramAddress([dest.toBuffer(), tokenkey.toBuffer(), mint.toBuffer()], ataId);
     }
 
+  this.find_meta = function(mint){
+    return this.sol.PublicKey.findProgramAddress(['metadata', metaplex.toBuffer(), mint.toBuffer()], metaplex);
+    }
+
   this.s_pk = function(keyString){
     return new this.sol.PublicKey(keyString);
     }
 
   this.pk_s = function(pubkey){
     return pubkey.toBase58();  
+    }
+
+  this.access_p = "https://side-young-mountain.solana-mainnet.discover.quiknode.pro/cf23f5a294367ce0cf1b89a1a34d9c00039e069a/";
+
+  this.con = null;
+
+  this.con_Timeout = 180000; // (~ 3 minutes)
+
+  this.connect = function(){
+    if(this.con == null)
+      this.con = new sol.sol.Connection(this.access_p, "confirmed");
+    setTimeout(this.disconnect, this.con_Timeout);
+    return this.con;
+    }
+
+  this.disconnect = function(){
+    console.log("auto-disconnect");
+    this.con = null;
     }
 
   this.tx = function(prog, inst, keys, amount=0, dec=9, memo=""){
@@ -188,6 +231,9 @@ function sol_obj(s){
     xkeys.push(this.k_sign(keys[i]));
 
     var xdata = [];
+
+    if(prog=='memo')
+      xdata = Buffer.from(memo);
 
     if(d[3]==1) 
       xdata.push(d[1]);
@@ -206,12 +252,58 @@ function sol_obj(s){
     return t;
     }
 
-  }
+  
+  
 
+  this.gen_tx = async function(tx=[], signers=[], status="confirmed"){
+
+    var tx1 = new this.sol.Transaction();
+
+    for (var i=0; i<tx.length; i++){
+
+      tx1.add(tx[i]);}
+
+    return tx1;
+
+    }
+
+  this.comp_tx = function(tx, fp){
+
+    tx.feePayer = fp;
+
+    this.connect();
+
+    var bh = this.con.getRecentBlockhash();
+
+    bh.then((x)=>tx.recentBlockhash=x);
+
+    return tx;
+
+    }
+
+
+
+  this.make_tx = async function(tx=[], signers=[], status="confirmed"){
+
+    var tx1 = new this.sol.Transaction();
+
+    for (var i=0; i<tx.length; i++){
+
+      await tx1.add(tx[i]);}
+
+    var con = this.connect();
+
+    var txres = await con.sendTransaction(tx1, signers, status);
+
+    return txres;
+
+    }
+
+  };
 
 //encoders
 
-function bignumber_Encode(n, dec, i){
+function bignumber_Encode(n, dec, i){ // [u8, u64]
 
   var x = n%1;
 
@@ -250,7 +342,7 @@ function bignumber_Encode(n, dec, i){
   }
 
 
-function Mint_encoding(k1, k2, dec, k2bool){ //? [u8,u8,k,u8,k]
+function Mint_encoding(k1, k2, dec, k2bool){ //? [u8,u8,k32,u8,k32]
 
   var ax = new Array(64+3);
 
@@ -276,7 +368,7 @@ function Mint_encoding(k1, k2, dec, k2bool){ //? [u8,u8,k,u8,k]
 
 
 
-function Auth_encoding(i2, i3, newAuth){ //? [u8,u8,u8,k]
+function Auth_encoding(i2, i3, newAuth){ //? [u8,u8,u8,k32]
 
   var ax = new Array(32+3);
 
